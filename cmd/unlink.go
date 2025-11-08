@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ildx/merlin/internal/cli"
 	"github.com/ildx/merlin/internal/config"
 	"github.com/ildx/merlin/internal/parser"
 	"github.com/ildx/merlin/internal/symlink"
@@ -16,15 +17,25 @@ var unlinkAll bool
 var unlinkCmd = &cobra.Command{
 	Use:   "unlink [tool]",
 	Short: "Remove symlinks for dotfiles",
-	Long: `Remove symbolic links created by merlin.
-	
-This command safely removes symlinks that point to your dotfiles repository.
-It will NOT remove symlinks that point elsewhere or regular files (safety check).
+	Long: `Remove symlinks previously created by merlin.
 
-Examples:
-  merlin unlink git           # Unlink git config
-  merlin unlink --all         # Unlink all configs
-  merlin unlink zsh --dry-run # Preview zsh unlinking`,
+SAFETY
+	• Only removes symlinks that point back into your dotfiles repo
+	• Regular files / foreign symlinks are left untouched
+
+FLAGS
+	--all        Unlink all discovered tools
+	--dry-run    Preview what would be removed
+	--verbose    Show each evaluated path
+
+EXAMPLES
+	merlin unlink git            # Remove git links
+	merlin unlink zsh --dry-run  # Preview zsh unlinking
+	merlin unlink --all          # Remove all links
+
+TIPS
+	Run 'merlin link --all' again to restore after a dry run preview.
+	Use 'merlin validate' to ensure configs before re-linking.`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
@@ -33,7 +44,7 @@ Examples:
 		// Find dotfiles repo
 		repo, err := config.FindDotfilesRepo()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			cli.Error("%v", err)
 			os.Exit(1)
 		}
 
@@ -49,14 +60,14 @@ Examples:
 		rootConfigPath := repo.GetRootMerlinConfig()
 		rootConfig, err := parser.ParseRootMerlinTOML(rootConfigPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error parsing root config: %v\n", err)
+			cli.Error("parsing root config: %v", err)
 			os.Exit(1)
 		}
 
 		// Get variables
 		vars, err := symlink.GetVariablesFromRoot(rootConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting variables: %v\n", err)
+			cli.Error("getting variables: %v", err)
 			os.Exit(1)
 		}
 
@@ -79,14 +90,14 @@ func init() {
 func runUnlinkTool(repo *config.DotfilesRepo, toolName string, vars symlink.Variables, dryRun, verbose bool) {
 	// Check if tool exists
 	if !repo.ToolExists(toolName) {
-		fmt.Fprintf(os.Stderr, "Error: Tool '%s' not found in dotfiles repository\n", toolName)
+		cli.Error("Tool '%s' not found in dotfiles repository", toolName)
 		os.Exit(1)
 	}
 
 	// Discover tool config
 	tool, err := symlink.DiscoverToolConfig(repo, toolName, vars)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error discovering tool config: %v\n", err)
+		cli.Error("discovering tool config: %v", err)
 		os.Exit(1)
 	}
 
@@ -113,7 +124,7 @@ func runUnlinkTool(repo *config.DotfilesRepo, toolName string, vars symlink.Vari
 	// Unlink the tool
 	results, err := symlink.UnlinkTool(tool, dryRun)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error unlinking tool: %v\n", err)
+		cli.Warning("unlinking tool: %v", err)
 	}
 
 	// Display results
@@ -124,7 +135,7 @@ func runUnlinkAll(repo *config.DotfilesRepo, vars symlink.Variables, dryRun, ver
 	// Discover all tools
 	tools, err := symlink.DiscoverTools(repo, vars)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error discovering tools: %v\n", err)
+		cli.Error("discovering tools: %v", err)
 		os.Exit(1)
 	}
 
@@ -227,4 +238,3 @@ func displayUnlinkResults(results []*symlink.UnlinkResult, verbose bool) {
 	fmt.Printf("Summary: %d removed, %d skipped, %d errors\n",
 		successCount, skipCount, errorCount)
 }
-

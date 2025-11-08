@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ildx/merlin/internal/cli"
 	"github.com/ildx/merlin/internal/config"
 	"github.com/ildx/merlin/internal/installer"
 	"github.com/ildx/merlin/internal/models"
@@ -17,13 +18,39 @@ import (
 var installCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Install packages and apps",
-	Long: `Install Homebrew packages, Mac App Store apps, or run install scripts.
+	Long: `Install Homebrew packages and Mac App Store applications defined in TOML.
 
-Examples:
-  merlin install brew           Install all Homebrew packages
-  merlin install brew --formulae-only
-  merlin install brew --casks-only
-  merlin install mas            Install Mac App Store apps`,
+SUBCOMMANDS
+	brew   Install Homebrew formulae & casks from brew.toml
+	mas    Install Mac App Store apps from mas.toml
+
+BEHAVIOR
+	Interactive selector is shown unless --all or --dry-run is used.
+	Already-installed items are skipped automatically.
+
+FLAGS (brew)
+	--all            Install all formulae & casks without prompting
+	--formulae-only  Only install formulae
+	--casks-only     Only install casks
+	--dry-run        Show what would be installed
+	--verbose,-v     More detailed output
+
+FLAGS (mas)
+	--all            Install all apps without prompting
+	--dry-run        Preview actions only
+	--verbose,-v     More detailed output
+
+EXAMPLES
+	merlin install brew                 # Interactive picker
+	merlin install brew --all           # Install everything
+	merlin install brew --formulae-only # Only CLI tools
+	merlin install mas                  # Interactive MAS selection
+	merlin install mas --all --dry-run  # Preview full install
+
+NOTES
+	• For MAS installs you must be signed into the App Store.
+	• Use merlin list brew|mas to inspect definitions first.
+	• Combine with --dry-run to stage changes safely.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},
@@ -39,7 +66,7 @@ Use --all to install all packages without prompting.
 Use --dry-run to preview what would be installed without actually installing.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runInstallBrew(cmd); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			cli.Error("%v", err)
 			os.Exit(1)
 		}
 	},
@@ -57,7 +84,7 @@ Use --dry-run to preview what would be installed without actually installing.
 Note: You must be signed into the Mac App Store for installation to work.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runInstallMAS(cmd); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			cli.Error("%v", err)
 			os.Exit(1)
 		}
 	},
@@ -207,7 +234,7 @@ func runInstallMAS(cmd *cobra.Command) error {
 
 	// Check prerequisites
 	fmt.Println("\n🔍 Checking prerequisites...")
-	
+
 	// Check if mas-cli is installed
 	masCheck := system.CheckMAS()
 	if !masCheck.Exists {
@@ -306,4 +333,3 @@ func runInstallMAS(cmd *cobra.Command) error {
 
 	return nil
 }
-

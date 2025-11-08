@@ -5,7 +5,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ildx/merlin/internal/cli"
 	"github.com/ildx/merlin/internal/config"
+	"github.com/ildx/merlin/internal/models"
 	"github.com/ildx/merlin/internal/parser"
 	"github.com/ildx/merlin/internal/scripts"
 	"github.com/ildx/merlin/internal/symlink"
@@ -13,24 +15,48 @@ import (
 )
 
 var (
-	linkStrategy  string
-	linkAll       bool
+	linkStrategy   string
+	linkAll        bool
 	linkRunScripts bool
+	linkProfile    string
 )
 
 var linkCmd = &cobra.Command{
 	Use:   "link [tool]",
 	Short: "Create symlinks for dotfiles",
-	Long: `Create symbolic links from your dotfiles to their target locations.
-	
-By default, this command links a specific tool's configuration. You can also
-use --all to link all discovered configs.
+	Long: `Create symbolic links from your dotfiles repository to target locations.
 
-Examples:
-  merlin link git              # Link git config
-  merlin link --all            # Link all configs
-  merlin link zsh --dry-run    # Preview zsh linking
-  merlin link eza --strategy backup  # Link with backup strategy`,
+BEHAVIOR
+	• Without flags: link a single tool's configuration.
+	• --all links every discovered tool.
+	• --profile filters tools by a named profile from root merlin.toml.
+	• Variable placeholders in targets (e.g. {home_dir}) are expanded.
+
+CONFLICT STRATEGIES
+	skip (default)    Leave existing files untouched
+	backup            Move existing file to .backup.<timestamp>
+	overwrite         Replace existing file/symlink
+
+FLAGS
+	--all             Link all tools
+	--strategy <s>    Conflict strategy (skip|backup|overwrite)
+	--run-scripts     Run tool scripts after linking (if defined)
+	--profile <name>  Filter tools to profile list
+	--dry-run         Preview actions only
+	--verbose,-v      Detailed per-link output
+
+EXAMPLES
+	merlin link git                            # Link git configs
+	merlin link zsh --dry-run                  # Preview linking
+	merlin link eza --strategy backup          # Backup existing files
+	merlin link --all                          # Link everything
+	merlin link --all --profile personal       # Profile-filtered batch
+	merlin link zellij --run-scripts           # Link + run scripts
+
+SEE ALSO
+	merlin unlink   Remove symlinks
+	merlin validate Validate configurations
+	merlin list     Overview of tools`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
@@ -39,14 +65,14 @@ Examples:
 		// Parse strategy
 		strategy, err := symlink.ParseStrategy(linkStrategy)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			cli.Error("%v", err)
 			os.Exit(1)
 		}
 
 		// Find dotfiles repo
 		repo, err := config.FindDotfilesRepo()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			cli.Error("%v", err)
 			os.Exit(1)
 		}
 
@@ -63,19 +89,19 @@ Examples:
 		rootConfigPath := repo.GetRootMerlinConfig()
 		rootConfig, err := parser.ParseRootMerlinTOML(rootConfigPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error parsing root config: %v\n", err)
+			cli.Error("parsing root config: %v", err)
 			os.Exit(1)
 		}
 
 		// Get variables
 		vars, err := symlink.GetVariablesFromRoot(rootConfig)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting variables: %v\n", err)
+			cli.Error("getting variables: %v", err)
 			os.Exit(1)
 		}
 
-		if linkAll {
-			runLinkAll(repo, vars, strategy, dryRun, verbose, linkRunScripts)
+		if linkAll || linkProfile != "" {
+			runLinkAll(repo, vars, strategy, dryRun, verbose, linkRunScripts, rootConfig)
 		} else if len(args) == 1 {
 			runLinkTool(repo, args[0], vars, strategy, dryRun, verbose, linkRunScripts)
 		} else {
@@ -90,19 +116,20 @@ func init() {
 	linkCmd.Flags().StringVar(&linkStrategy, "strategy", "skip", "Conflict resolution strategy (skip, backup, overwrite)")
 	linkCmd.Flags().BoolVar(&linkAll, "all", false, "Link all discovered configs")
 	linkCmd.Flags().BoolVar(&linkRunScripts, "run-scripts", false, "Run tool scripts after linking")
+	linkCmd.Flags().StringVar(&linkProfile, "profile", "", "Use specific profile to filter tools")
 }
 
 func runLinkTool(repo *config.DotfilesRepo, toolName string, vars symlink.Variables, strategy symlink.ConflictStrategy, dryRun, verbose, runScripts bool) {
 	// Check if tool exists
 	if !repo.ToolExists(toolName) {
-		fmt.Fprintf(os.Stderr, "Error: Tool '%s' not found in dotfiles repository\n", toolName)
+		cli.Error("Tool '%s' not found in dotfiles repository", toolName)
 		os.Exit(1)
 	}
 
 	// Discover tool config
 	tool, err := symlink.DiscoverToolConfig(repo, toolName, vars)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error discovering tool config: %v\n", err)
+		cli.Error("discovering tool config: %v", err)
 		os.Exit(1)
 	}
 
@@ -129,7 +156,7 @@ func runLinkTool(repo *config.DotfilesRepo, toolName string, vars symlink.Variab
 	// Link the tool
 	results, err := symlink.LinkToolWithStrategy(tool, strategy, dryRun)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error linking tool: %v\n", err)
+		cli.Warning("linking tool: %v", err)
 	}
 
 	// Display results
@@ -146,7 +173,7 @@ func runPostLinkScripts(repo *config.DotfilesRepo, toolName string, vars symlink
 	merlinPath := repo.GetToolMerlinConfig(toolName)
 	toolConfig, err := parser.ParseToolMerlinTOML(merlinPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "\nWarning: Failed to parse %s: %v\n", merlinPath, err)
+		cli.Warning("Failed to parse %s: %v", merlinPath, err)
 		return
 	}
 
@@ -165,7 +192,7 @@ func runPostLinkScripts(repo *config.DotfilesRepo, toolName string, vars symlink
 	runner := scripts.NewScriptRunner(toolRoot, env, dryRun, verbose, os.Stdout)
 	scriptResults, err := runner.RunScripts(toolConfig)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: Failed to run scripts: %v\n", err)
+		cli.Warning("Failed to run scripts: %v", err)
 		return
 	}
 
@@ -175,16 +202,48 @@ func runPostLinkScripts(repo *config.DotfilesRepo, toolName string, vars symlink
 	}
 }
 
-func runLinkAll(repo *config.DotfilesRepo, vars symlink.Variables, strategy symlink.ConflictStrategy, dryRun, verbose, runScripts bool) {
+func runLinkAll(repo *config.DotfilesRepo, vars symlink.Variables, strategy symlink.ConflictStrategy, dryRun, verbose, runScripts bool, rootConfig *models.RootMerlinConfig) {
 	// Discover all tools
 	tools, err := symlink.DiscoverTools(repo, vars)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error discovering tools: %v\n", err)
+		cli.Error("discovering tools: %v", err)
 		os.Exit(1)
 	}
 
 	if len(tools) == 0 {
 		fmt.Println("No tools found to link")
+		return
+	}
+
+	// Filter by profile if specified
+	if linkProfile != "" {
+		profile := rootConfig.GetProfileByName(linkProfile)
+		if profile == nil {
+			cli.Error("Profile '%s' not found", linkProfile)
+			os.Exit(1)
+		}
+
+		// Filter tools to only those in profile
+		if len(profile.Tools) > 0 {
+			filteredTools := make([]*symlink.ToolConfig, 0)
+			profileToolSet := make(map[string]bool)
+			for _, name := range profile.Tools {
+				profileToolSet[name] = true
+			}
+
+			for _, tool := range tools {
+				if profileToolSet[tool.Name] {
+					filteredTools = append(filteredTools, tool)
+				}
+			}
+
+			tools = filteredTools
+			fmt.Printf("Using profile '%s' (%d tools)\n\n", linkProfile, len(tools))
+		}
+	}
+
+	if len(tools) == 0 {
+		fmt.Println("No tools found to link (after profile filtering)")
 		return
 	}
 
@@ -306,4 +365,3 @@ func displayLinkResults(results []*symlink.LinkResult, verbose bool) {
 	fmt.Printf("Summary: %d linked, %d skipped, %d errors\n",
 		successCount, skipCount, errorCount)
 }
-

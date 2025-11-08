@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ildx/merlin/internal/cli"
 	"github.com/ildx/merlin/internal/config"
 	"github.com/ildx/merlin/internal/parser"
 	"github.com/ildx/merlin/internal/scripts"
@@ -15,14 +16,27 @@ var runCmd = &cobra.Command{
 	Use:   "run [tool]",
 	Short: "Run setup scripts for a tool",
 	Long: `Execute setup scripts defined in a tool's merlin.toml configuration.
-	
-This command runs the scripts defined in the [scripts] section of a tool's
-configuration. Scripts are executed in the order they appear.
 
-Examples:
-  merlin run zellij              # Run zellij setup scripts
-  merlin run cursor --dry-run    # Preview cursor scripts
-  merlin run git --verbose       # Run git scripts with verbose output`,
+BEHAVIOR
+	Scripts defined under [scripts] are executed sequentially in the order listed.
+	Dry-run mode shows what would execute without running the scripts.
+
+FLAGS
+	--dry-run     Preview script execution plan
+	--verbose,-v  Stream each script's output lines
+
+VALIDATION
+	Before execution, scripts are validated for existence. Missing scripts abort.
+
+EXAMPLES
+	merlin run zellij                 # Run zellij scripts
+	merlin run cursor --dry-run       # Preview cursor scripts
+	merlin run git --verbose          # Detailed streaming output
+
+TIPS
+	Combine after linking: merlin link zellij --run-scripts
+	Use profiles to limit tools that need script execution.
+	TUI flow for scripts is coming soon (see merlin tui).`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
@@ -31,7 +45,7 @@ Examples:
 		toolName := args[0]
 
 		if err := runToolScripts(toolName, dryRun, verbose); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			cli.Error("%v", err)
 			os.Exit(1)
 		}
 	},
@@ -155,4 +169,3 @@ func runToolScripts(toolName string, dryRun, verbose bool) error {
 
 	return nil
 }
-
