@@ -137,6 +137,11 @@ func (r *DotfilesRepo) GetToolMerlinConfig(toolName string) string {
 	return filepath.Join(r.ConfigDir, toolName, RootConfigFile)
 }
 
+// GetRootMerlinConfig returns the path to the root merlin.toml file
+func (r *DotfilesRepo) GetRootMerlinConfig() string {
+	return filepath.Join(r.Root, RootConfigFile)
+}
+
 // ToolExists checks if a tool directory exists in the dotfiles repo
 func (r *DotfilesRepo) ToolExists(toolName string) bool {
 	toolPath := r.GetToolRoot(toolName)
