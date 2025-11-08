@@ -60,4 +60,14 @@ var (
 			Border(lipgloss.DoubleBorder()).
 			BorderForeground(primaryColor).
 			Padding(1, 2)
+
+	docStyle = lipgloss.NewStyle().
+			Padding(1, 2)
+
+	paginationStyle = lipgloss.NewStyle().
+			Foreground(mutedColor)
+
+	progressStyle = lipgloss.NewStyle().
+			Foreground(accentColor).
+			Bold(true)
 )

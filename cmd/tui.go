@@ -81,6 +81,8 @@ func runTUI() error {
 		return runTUIDotfiles()
 	case "scripts":
 		return runTUIScripts()
+	case "backups":
+		return runTUIBackups()
 	case "doctor":
 		runDoctor()
 		return nil
@@ -101,4 +103,8 @@ func runTUIDotfiles() error {
 
 func runTUIScripts() error {
 	return tui.LaunchScriptRunner()
+}
+
+func runTUIBackups() error {
+	return tui.LaunchBackupManager()
 }

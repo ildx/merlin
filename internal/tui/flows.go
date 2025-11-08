@@ -127,6 +127,77 @@ func LaunchPackageInstaller() error {
 	return nil
 }
 
+// LaunchBackupManager starts the backup management flow
+func LaunchBackupManager() error {
+	// Step 1: Show list of backups
+	listModel, err := NewBackupListModel()
+	if err != nil {
+		return fmt.Errorf("failed to load backups: %w", err)
+	}
+
+	p := tea.NewProgram(listModel, tea.WithAltScreen())
+	finalModel, err := p.Run()
+	if err != nil {
+		return fmt.Errorf("backup list failed: %w", err)
+	}
+
+	list, ok := finalModel.(BackupListModel)
+	if !ok || list.selected == nil {
+		// User cancelled
+		return nil
+	}
+
+	// Step 2: Show backup details and file selection
+	detailsModel := NewBackupDetailsModel(list.selected)
+	p = tea.NewProgram(detailsModel, tea.WithAltScreen())
+	finalModel, err = p.Run()
+	if err != nil {
+		return fmt.Errorf("backup details failed: %w", err)
+	}
+
+	details, ok := finalModel.(BackupDetailsModel)
+	if !ok || !details.confirm {
+		// User cancelled
+		return nil
+	}
+
+	// Build list of selected files
+	var selectedFiles []string
+	allSelected := true
+	for i, entry := range details.manifest.Files {
+		if details.selected[i] {
+			selectedFiles = append(selectedFiles, entry.OriginalPath)
+		} else {
+			allSelected = false
+		}
+	}
+
+	// If all selected, pass nil to restore all
+	if allSelected {
+		selectedFiles = nil
+	}
+
+	// Step 3: Perform restore
+	restoreModel := NewBackupRestoreModel(details.manifest, selectedFiles)
+	p = tea.NewProgram(restoreModel, tea.WithAltScreen())
+	finalModel, err = p.Run()
+	if err != nil {
+		return fmt.Errorf("backup restore failed: %w", err)
+	}
+
+	restore, ok := finalModel.(BackupRestoreModel)
+	if !ok {
+		return nil
+	}
+
+	if restore.err != nil {
+		return restore.err
+	}
+
+	fmt.Println(restore.status)
+	return nil
+}
+
 // LaunchConfigManager shows config selection and link/unlink
 func LaunchConfigManager() error {
 	// Find dotfiles repo

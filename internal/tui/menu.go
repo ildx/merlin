@@ -43,6 +43,11 @@ func NewMenuModel() MenuModel {
 			Action:      "scripts",
 		},
 		{
+			Title:       "💾 Manage Backups",
+			Description: "View and restore configuration backups",
+			Action:      "backups",
+		},
+		{
 			Title:       "🔍 Doctor",
 			Description: "Check system prerequisites",
 			Action:      "doctor",

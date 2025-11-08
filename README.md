@@ -20,6 +20,7 @@ Core:
 Advanced:
 - Profile support for per-machine setups
 - Config validation (syntax, duplicates, broken links, missing scripts)
+- Backup & restore system with checksums and integrity verification
 - Logging to `~/.merlin/merlin.log` (enable with `--verbose`)
 - Dry-run & verbose flags everywhere
 - System doctor for environment checks
@@ -43,6 +44,10 @@ merlin link --profile <name>  # Link tools in profile
 merlin link <tool> --strategy backup --run-scripts
 merlin unlink <tool>|--all    # Remove symlinks
 merlin run <tool>             # Run tool scripts only
+merlin backup create <files...> --reason "description"  # Create backup
+merlin backup list             # List all backups
+merlin backup restore <id>     # Restore backup
+merlin backup clean --keep 5   # Clean old backups
 ```
 
 Flags: `--dry-run`, `--verbose` (global), plus command‑specific ones (`--all`, `--formulae-only`, `--casks-only`, `--strategy`, `--run-scripts`, `--profile`, `--strict`).
@@ -52,6 +57,7 @@ Flags: `--dry-run`, `--verbose` (global), plus command‑specific ones (`--all`,
 Running `merlin` (or `merlin tui`) launches an interactive interface where you can:
 - Browse and select packages to install with checkboxes
 - Manage dotfiles (link/unlink configs)
+- View and restore configuration backups
 - Run tool scripts with multi-select and real-time progress tracking
 - Check system prerequisites
 

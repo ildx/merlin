@@ -274,6 +274,90 @@ scripts = [
 
 Tags help categorize scripts for selection but don't affect execution order—all selected scripts run sequentially.
 
+### Backup & Restore Flow
+
+Merlin includes comprehensive backup and restore functionality to protect your configurations:
+
+**From TUI:**
+
+1. From the main menu, select **💾 Manage Backups**
+2. Browse list of available backups with timestamps and descriptions
+3. Select a backup to restore (or press `d` to delete)
+4. Choose which files to restore:
+    - Space: toggle individual file
+    - `a`: select all files
+    - `n`: deselect all files
+5. Confirm restore operation
+6. Files are verified (checksum) and restored to original locations
+
+**From CLI:**
+
+Create backups manually:
+```bash
+# Backup specific files
+merlin backup create ~/.zshrc ~/.gitconfig --reason "Before testing changes"
+
+# Backup with glob patterns
+merlin backup create ~/covenant/config/zsh/config/*.zsh
+```
+
+List all backups:
+```bash
+merlin backup list
+```
+
+Show backup details:
+```bash
+merlin backup show 20250108_143022
+```
+
+Restore from backup:
+```bash
+# Restore all files
+merlin backup restore 20250108_143022
+
+# Selective restore
+merlin backup restore 20250108_143022 --files ~/.zshrc,~/.gitconfig
+
+# Skip confirmation prompt
+merlin backup restore 20250108_143022 --force
+```
+
+Clean old backups:
+```bash
+# Keep only 5 most recent backups
+merlin backup clean --keep 5
+
+# Delete backups older than 30 days
+merlin backup clean --older-than 30
+```
+
+Delete specific backup:
+```bash
+merlin backup delete 20250108_143022
+```
+
+**Automatic Backups:**
+
+Backups are automatically created when using the backup conflict strategy during linking:
+
+```bash
+merlin link zsh --strategy backup
+```
+
+This creates a timestamped backup before overwriting any existing files. The backup ID is included in the link operation output, allowing easy restoration if needed.
+
+**Backup Storage:**
+
+- Location: `~/.merlin/backups/<timestamp>/`
+- Each backup includes a JSON manifest with metadata:
+   - Timestamp and reason for backup
+   - Original file paths and backup locations
+   - File sizes and SHA256 checksums
+- Checksums are verified before restore to ensure integrity
+
+---
+
 ---
 ## Dry-Run Strategy
 

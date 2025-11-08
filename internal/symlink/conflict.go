@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/ildx/merlin/internal/backup"
 )
 
 // ConflictStrategy defines how to handle conflicts
@@ -113,25 +115,32 @@ func ResolveConflict(source, target string, strategy ConflictStrategy, dryRun bo
 			return result, nil
 		}
 
-		// Create backup
-		backupPath := generateBackupPath(target)
-		if err := os.Rename(target, backupPath); err != nil {
+		// Create backup using backup system
+		manifest, err := backup.CreateBackup([]string{target}, fmt.Sprintf("Before linking %s", source))
+		if err != nil {
 			result.Status = LinkStatusError
 			result.Message = fmt.Sprintf("failed to backup: %v", err)
 			return result, fmt.Errorf("failed to backup: %w", err)
 		}
 
+		// Remove existing file/directory now that it's backed up
+		if err := os.RemoveAll(target); err != nil {
+			result.Status = LinkStatusError
+			result.Message = fmt.Sprintf("failed to remove after backup: %v", err)
+			return result, fmt.Errorf("failed to remove: %w", err)
+		}
+
 		// Create symlink
 		if err := os.Symlink(source, target); err != nil {
-			// Try to restore backup
-			os.Rename(backupPath, target)
+			// Try to restore from backup
+			backup.RestoreBackup(manifest.ID, []string{target})
 			result.Status = LinkStatusError
 			result.Message = fmt.Sprintf("failed to create symlink: %v", err)
 			return result, fmt.Errorf("failed to create symlink: %w", err)
 		}
 
 		result.Status = LinkStatusSuccess
-		result.Message = fmt.Sprintf("backed up to %s and linked", backupPath)
+		result.Message = fmt.Sprintf("backed up (ID: %s) and linked", manifest.ID)
 		return result, nil
 
 	case StrategyOverwrite:
@@ -187,7 +196,7 @@ func LinkToolWithStrategy(tool *ToolConfig, strategy ConflictStrategy, dryRun bo
 	for _, link := range tool.Links {
 		result, err := ResolveConflict(link.Source, link.Target, strategy, dryRun)
 		allResults = append(allResults, result)
-		
+
 		// Continue with other links even if one fails
 		if err != nil && result.Status == LinkStatusError {
 			continue
@@ -196,4 +205,3 @@ func LinkToolWithStrategy(tool *ToolConfig, strategy ConflictStrategy, dryRun bo
 
 	return allResults, nil
 }
-
