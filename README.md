@@ -1,5 +1,7 @@
 # Merlin
 
+## This repo in development, and untested!
+
 CLI for managing macOS dotfiles: install packages & apps, link configs, run scripts.
 
 <img width="1400" height="700" alt="image" src="https://github.com/user-attachments/assets/fadd014d-03d6-4731-992b-83da7d63ab3e" />
