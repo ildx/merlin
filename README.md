@@ -2,6 +2,8 @@
 
 > A macOS-focused CLI tool for managing dotfiles with style ✨
 
+<img width="1400" height="700" alt="image" src="https://github.com/user-attachments/assets/fadd014d-03d6-4731-992b-83da7d63ab3e" />
+
 Merlin is a powerful yet simple dotfiles manager that handles package installation, configuration symlinking, and custom setup scripts—all from declarative TOML files. Built with Go and [Charm](https://charm.sh/) for a beautiful terminal experience.
 
 ---
