@@ -15,12 +15,15 @@ Core:
 - Native symlinking with conflict strategies: skip / backup / overwrite
 - Safe unlink (only removes symlinks pointing to the repo)
 - Tool scripts: validate & run (or automatically via `link --run-scripts`)
+- Drift inspection with `merlin diff` (packages, symlinks, scripts)
 - Variable expansion from root `merlin.toml` (`{home_dir}`, `{config_dir}`)
 
 Advanced:
 - Profile support for per-machine setups
 - Config validation (syntax, duplicates, broken links, missing scripts)
 - Backup & restore system with checksums and integrity verification
+- Symlink divergence detection (content hashing) for audit
+- Optional Git auto-commit for link & backup operations (`auto_commit` setting)
 - Logging to `~/.merlin/merlin.log` (enable with `--verbose`)
 - Dry-run & verbose flags everywhere
 - System doctor for environment checks
@@ -48,6 +51,7 @@ merlin backup create <files...> --reason "description"  # Create backup
 merlin backup list             # List all backups
 merlin backup restore <id>     # Restore backup
 merlin backup clean --keep 5   # Clean old backups
+merlin diff                    # Show drift (use --json, --packages, --configs, --scripts)
 ```
 
 Flags: `--dry-run`, `--verbose` (global), plus command‑specific ones (`--all`, `--formulae-only`, `--casks-only`, `--strategy`, `--run-scripts`, `--profile`, `--strict`).
@@ -116,6 +120,52 @@ files = [
 - Strategies: skip (default), backup (rename original), overwrite
 - Already-linked detection
 
+## Git Auto-Commit (Optional)
+
+Enable lightweight auditing of repository state changes by setting in your root `merlin.toml`. Suppress on a per-run basis with `--no-auto-commit`.
+
+```toml
+[settings]
+auto_commit = true
+```
+
+Behavior:
+- After successful `merlin link` operations, Merlin stages only the affected tool directories (`config/<tool>`) and commits with a message like (or creates an empty commit if nothing changed):
+  - `chore(link): link zsh`
+  - `chore(link): link zsh, git (2 tools)`
+  - `chore(link): link 5 tools (zsh, git, eza, …)`
+- After `merlin backup create`, Merlin appends a summary entry to `.merlin-meta/backups.json` inside the repo and commits just that file: `chore(backup): record <id> (<n> files)` (empty commit fallback).
+- After `merlin unlink`, Merlin records removal actions similarly:
+  - `chore(unlink): unlink zsh`
+  - `chore(unlink): unlink zsh, git (2 tools)`
+  - `chore(unlink): unlink 4 tools (zsh, git, eza, …)`
+
+Design Principles:
+- Minimal scope: stages only tool config directories or the backup index file—never auto-add your whole repository.
+- Non-intrusive: skipped if Git isn’t available, the directory isn’t a Git repo, or `auto_commit = false`.
+- Empty commits allowed: if no paths changed but you requested an operation, Merlin can create an empty commit (audit trail) unless unrelated changes would pollute scope.
+
+Disable if you prefer manual commit control; re-enable anytime. Prefixes (`chore(link):`, `chore(backup):`) let you filter history easily.
+
+Safety Model:
+- Whitelisted staging paths only (tool config dirs or backup index file)
+- Unrelated changes detection: auto-commit skipped if unstaged/untracked items exist outside whitelisted paths
+- Per-run suppression: `--no-auto-commit`
+- Graceful skip when git is absent or directory not a repo
+
+Examples:
+
+| Operation | Commit Example | Override Flag |
+|-----------|----------------|---------------|
+| link single | `chore(link): link zsh` | `--no-auto-commit` |
+| link batch (>3) | `chore(link): link 5 tools (zsh, git, eza, …)` | `--no-auto-commit` |
+| unlink batch | `chore(unlink): unlink 4 tools (zsh, git, eza, …)` | `--no-auto-commit` |
+| backup create | `chore(backup): record 20251108_120301 (3 files)` | `--no-auto-commit` |
+
+Planned Extensions:
+- Commit hooks for export/reconcile operations.
+- Optional squash mode for initial provisioning.
+
 ## Scripts
 
 Defined under `[scripts]` in a tool `merlin.toml`; run with `merlin run <tool>` or after linking using `--run-scripts`, or interactively through the TUI.
@@ -133,6 +183,38 @@ scripts = [
 ```
 
 Tags are displayed in the TUI selector and logged, helping you identify script purposes at a glance.
+
+### Diff & Drift Detection
+
+Use `merlin diff` to compare the current system against your declarative repo:
+
+```
+merlin diff                 # Full report
+merlin diff --packages      # Only Homebrew + MAS differences
+merlin diff --configs       # Symlink status (missing, orphaned, broken, divergent)
+merlin diff --scripts       # Script presence (namespaced as tool/script)
+merlin diff --json          # Machine-readable JSON
+```
+
+Symlink categories:
+- Missing: declared link not present
+- Orphaned: symlink points into repo but not declared
+- Broken: symlink target path does not exist
+- Divergent: symlink points to file whose content hash differs from declared source
+
+Script categories:
+- Added: script file exists but not declared in `[scripts]`
+- Missing: declared script not found on disk
+
+JSON schema keys: `brew_formulae`, `brew_casks`, `mas_apps`, `symlinks`, `scripts`.
+
+## Advanced Audit & Automation Roadmap
+
+Recent additions (Phase 12 & 13): drift detection, divergence hashing, script presence diff, and auto-commit hooks. Upcoming plans include:
+- `merlin clone <repo>`: bootstrap remote repo & perform initial link/install.
+- Uninstall commands for declaratively removing packages.
+- Update checks & export tooling (`merlin export` to snapshot current system as TOML).
+- Optional reconciliation commands to resolve Missing/Divergent items.
 
 ## Quick Start
 
@@ -172,6 +254,7 @@ Implemented Phase 10 features:
 - ✅ Enhanced logging with per-script timing
 
 Future enhancements may include script retry mechanisms and tag-based CLI filtering.
+Diff phase adds future potential for auto-reconciliation and export tooling.
 
 ## Build & Test
 

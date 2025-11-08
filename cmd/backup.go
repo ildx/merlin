@@ -1,14 +1,20 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/ildx/merlin/internal/backup"
+	"github.com/ildx/merlin/internal/cli"
+	"github.com/ildx/merlin/internal/config"
+	"github.com/ildx/merlin/internal/git"
+	"github.com/ildx/merlin/internal/parser"
 	"github.com/spf13/cobra"
 )
 
@@ -86,11 +92,12 @@ var backupDeleteCmd = &cobra.Command{
 }
 
 var (
-	backupReason    string
-	backupFiles     string
-	backupKeep      int
-	backupOlderThan int
-	backupForce     bool
+	backupReason       string
+	backupFiles        string
+	backupKeep         int
+	backupOlderThan    int
+	backupForce        bool
+	backupNoAutoCommit bool
 )
 
 func init() {
@@ -105,6 +112,7 @@ func init() {
 
 	// Create flags
 	backupCreateCmd.Flags().StringVarP(&backupReason, "reason", "r", "", "Reason for creating this backup")
+	backupCreateCmd.Flags().BoolVar(&backupNoAutoCommit, "no-auto-commit", false, "Disable auto-commit even if enabled in settings")
 
 	// Restore flags
 	backupRestoreCmd.Flags().StringVar(&backupFiles, "files", "", "Comma-separated list of files to restore (default: all)")
@@ -152,6 +160,42 @@ func runBackupCreate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Files: %d\n", len(manifest.Files))
 	fmt.Printf("  Reason: %s\n", manifest.Reason)
 	fmt.Printf("\nRestore with: merlin backup restore %s\n", manifest.ID)
+
+	// Auto-commit hook: record backup metadata inside repo if auto_commit enabled (with safety)
+	if repo, err := config.FindDotfilesRepo(); err == nil { // only if inside a dotfiles repo environment
+		rootCfg, rErr := parser.ParseRootMerlinTOML(repo.GetRootMerlinConfig())
+		if rErr == nil && rootCfg.Settings.AutoCommit && !backupNoAutoCommit && git.IsGitAvailable() {
+			if repoGit, gErr := git.Open(repo.Root); gErr == nil {
+				// Build / ensure backup index file
+				relPath, wErr := updateBackupIndex(repo.Root, manifest)
+				if wErr != nil {
+					cli.Warning("backup index update failed: %v", wErr)
+				} else {
+					// Safety: ensure no unrelated changes outside index file
+					if unrelated, uErr := repoGit.HasUnrelatedChanges([]string{relPath}); uErr == nil && unrelated {
+						cli.Warning("auto-commit (backup) skipped: unrelated changes detected")
+					} else {
+						msg := buildBackupCommitMessage(manifest)
+						if cErr := repoGit.Commit(msg, []string{relPath}); cErr != nil {
+							if strings.Contains(cErr.Error(), "no staged changes") {
+								// Allow empty commit to preserve audit trail
+								cmd := exec.Command("git", "-C", repoGit.Root, "commit", "--allow-empty", "-m", msg)
+								if e2 := cmd.Run(); e2 != nil {
+									cli.Warning("auto-commit (backup) skipped (no changes): %v", cErr)
+								} else {
+									cli.Success("Auto-commit created (%s)", msg)
+								}
+							} else {
+								cli.Warning("auto-commit (backup) failed: %v", cErr)
+							}
+						} else {
+							cli.Success("Auto-commit created (%s)", msg)
+						}
+					}
+				}
+			}
+		}
+	}
 
 	return nil
 }
@@ -377,4 +421,57 @@ func runBackupDelete(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("✅ Backup deleted successfully")
 	return nil
+}
+
+// backupIndex is the JSON schema stored in the repo tracking backups created while working in this repo.
+// A lightweight audit trail independent of actual backup storage under ~/.merlin/backups.
+type backupIndex struct {
+	Entries []backupIndexEntry `json:"entries"`
+}
+
+type backupIndexEntry struct {
+	ID        string `json:"id"`
+	Timestamp string `json:"timestamp"`
+	Reason    string `json:"reason"`
+	Files     int    `json:"files"`
+}
+
+// updateBackupIndex appends a manifest summary to the index file inside repo root.
+// Returns relative path to index file for staging.
+func updateBackupIndex(repoRoot string, manifest *backup.BackupManifest) (string, error) {
+	rel := ".merlin-meta/backups.json"
+	abs := filepath.Join(repoRoot, rel)
+	// Ensure directory exists
+	if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
+		return "", err
+	}
+	idx := backupIndex{Entries: []backupIndexEntry{}}
+	if data, err := os.ReadFile(abs); err == nil {
+		_ = json.Unmarshal(data, &idx) // best-effort
+	}
+	// Avoid duplicate IDs
+	for _, e := range idx.Entries {
+		if e.ID == manifest.ID {
+			return rel, nil
+		}
+	}
+	idx.Entries = append(idx.Entries, backupIndexEntry{
+		ID:        manifest.ID,
+		Timestamp: manifest.Timestamp.Format(time.RFC3339),
+		Reason:    manifest.Reason,
+		Files:     len(manifest.Files),
+	})
+	out, err := json.MarshalIndent(idx, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(abs, out, 0644); err != nil {
+		return "", err
+	}
+	return rel, nil
+}
+
+// buildBackupCommitMessage builds commit message for a backup auto-commit.
+func buildBackupCommitMessage(manifest *backup.BackupManifest) string {
+	return fmt.Sprintf("chore(backup): record %s (%d files)", manifest.ID, len(manifest.Files))
 }

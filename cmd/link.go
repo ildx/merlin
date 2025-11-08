@@ -3,10 +3,13 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/ildx/merlin/internal/cli"
 	"github.com/ildx/merlin/internal/config"
+	"github.com/ildx/merlin/internal/git"
 	"github.com/ildx/merlin/internal/models"
 	"github.com/ildx/merlin/internal/parser"
 	"github.com/ildx/merlin/internal/scripts"
@@ -14,11 +17,34 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// buildLinkCommitMessage crafts a concise commit message for auto-commit after linking.
+// Format examples:
+//
+//	chore(link): link zsh
+//	chore(link): link zsh, git (2 tools)
+//	chore(link): link 5 tools (zsh, git, eza, mise, zellij)
+func buildLinkCommitMessage(tools []string) string {
+	if len(tools) == 0 {
+		return "chore(link): no tools"
+	}
+	if len(tools) == 1 {
+		return fmt.Sprintf("chore(link): link %s", tools[0])
+	}
+	joined := strings.Join(tools, ", ")
+	if len(tools) <= 3 {
+		return fmt.Sprintf("chore(link): link %s (%d tools)", joined, len(tools))
+	}
+	// For many tools, keep message short and list first 3 + ellipsis
+	preview := strings.Join(tools[:3], ", ")
+	return fmt.Sprintf("chore(link): link %d tools (%s, …)", len(tools), preview)
+}
+
 var (
-	linkStrategy   string
-	linkAll        bool
-	linkRunScripts bool
-	linkProfile    string
+	linkStrategy     string
+	linkAll          bool
+	linkRunScripts   bool
+	linkProfile      string
+	linkNoAutoCommit bool // per-invocation override for auto-commit
 )
 
 var linkCmd = &cobra.Command{
@@ -100,16 +126,55 @@ SEE ALSO
 			os.Exit(1)
 		}
 
+		processedTools := []string{}
 		if linkAll || linkProfile != "" {
-			runLinkAll(repo, vars, strategy, dryRun, verbose, linkRunScripts, rootConfig)
+			processedTools = runLinkAll(repo, vars, strategy, dryRun, verbose, linkRunScripts, rootConfig)
 		} else if len(args) == 1 {
 			runLinkTool(repo, args[0], vars, strategy, dryRun, verbose, linkRunScripts)
+			processedTools = append(processedTools, args[0])
 		} else {
 			cmd.Help()
 			os.Exit(0)
 		}
+
+		// Auto-commit hook (Phase 13 integration + safety) unless overridden
+		if rootConfig.Settings.AutoCommit && !linkNoAutoCommit && !dryRun && git.IsGitAvailable() {
+			if len(processedTools) > 0 {
+				if repoGit, err := git.Open(rootConfigPathDir(repo)); err == nil {
+					paths := make([]string, 0, len(processedTools))
+					for _, t := range processedTools {
+						paths = append(paths, filepath.Join("config", t))
+					}
+					// Safety: abort if unrelated unstaged/untracked changes outside allowed paths
+					if unrelated, uErr := repoGit.HasUnrelatedChanges(paths); uErr == nil && unrelated {
+						cli.Warning("auto-commit skipped: unrelated changes detected outside tool directories")
+					} else {
+						paths = repoGit.FilterPaths(paths)
+						msg := buildLinkCommitMessage(processedTools)
+						if err := repoGit.Commit(msg, paths); err != nil {
+							if strings.Contains(err.Error(), "no staged changes") {
+								// Allow empty commit for traceability
+								cmd := exec.Command("git", "-C", repoGit.Root, "commit", "--allow-empty", "-m", msg)
+								if e2 := cmd.Run(); e2 != nil {
+									cli.Warning("auto-commit skipped (no changes): %v", err)
+								} else {
+									cli.Success("Auto-commit created (%s)", msg)
+								}
+							} else {
+								cli.Warning("auto-commit failed: %v", err)
+							}
+						} else {
+							cli.Success("Auto-commit created (%s)", msg)
+						}
+					}
+				}
+			}
+		}
 	},
 }
+
+// rootConfigPathDir extracts repo root directory from DotfilesRepo
+func rootConfigPathDir(repo *config.DotfilesRepo) string { return repo.Root }
 
 func init() {
 	rootCmd.AddCommand(linkCmd)
@@ -117,6 +182,7 @@ func init() {
 	linkCmd.Flags().BoolVar(&linkAll, "all", false, "Link all discovered configs")
 	linkCmd.Flags().BoolVar(&linkRunScripts, "run-scripts", false, "Run tool scripts after linking")
 	linkCmd.Flags().StringVar(&linkProfile, "profile", "", "Use specific profile to filter tools")
+	linkCmd.Flags().BoolVar(&linkNoAutoCommit, "no-auto-commit", false, "Disable auto-commit even if enabled in settings")
 }
 
 func runLinkTool(repo *config.DotfilesRepo, toolName string, vars symlink.Variables, strategy symlink.ConflictStrategy, dryRun, verbose, runScripts bool) {
@@ -202,7 +268,7 @@ func runPostLinkScripts(repo *config.DotfilesRepo, toolName string, vars symlink
 	}
 }
 
-func runLinkAll(repo *config.DotfilesRepo, vars symlink.Variables, strategy symlink.ConflictStrategy, dryRun, verbose, runScripts bool, rootConfig *models.RootMerlinConfig) {
+func runLinkAll(repo *config.DotfilesRepo, vars symlink.Variables, strategy symlink.ConflictStrategy, dryRun, verbose, runScripts bool, rootConfig *models.RootMerlinConfig) []string {
 	// Discover all tools
 	tools, err := symlink.DiscoverTools(repo, vars)
 	if err != nil {
@@ -212,7 +278,7 @@ func runLinkAll(repo *config.DotfilesRepo, vars symlink.Variables, strategy syml
 
 	if len(tools) == 0 {
 		fmt.Println("No tools found to link")
-		return
+		return []string{}
 	}
 
 	// Filter by profile if specified
@@ -244,7 +310,7 @@ func runLinkAll(repo *config.DotfilesRepo, vars symlink.Variables, strategy syml
 
 	if len(tools) == 0 {
 		fmt.Println("No tools found to link (after profile filtering)")
-		return
+		return []string{}
 	}
 
 	fmt.Printf("Linking %d tools\n\n", len(tools))
@@ -254,6 +320,7 @@ func runLinkAll(repo *config.DotfilesRepo, vars symlink.Variables, strategy syml
 	errorCount := 0
 	conflictCount := 0
 
+	processed := []string{}
 	for _, tool := range tools {
 		if len(tool.Links) == 0 {
 			continue
@@ -318,6 +385,7 @@ func runLinkAll(repo *config.DotfilesRepo, vars symlink.Variables, strategy syml
 		if runScripts {
 			runPostLinkScripts(repo, tool.Name, vars, dryRun, verbose)
 		}
+		processed = append(processed, tool.Name)
 	}
 
 	// Summary
@@ -328,6 +396,7 @@ func runLinkAll(repo *config.DotfilesRepo, vars symlink.Variables, strategy syml
 	if dryRun {
 		fmt.Println("\nThis was a dry run. No changes were made.")
 	}
+	return processed
 }
 
 func displayLinkResults(results []*symlink.LinkResult, verbose bool) {

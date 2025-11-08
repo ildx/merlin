@@ -3,16 +3,20 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/ildx/merlin/internal/cli"
 	"github.com/ildx/merlin/internal/config"
+	"github.com/ildx/merlin/internal/git"
 	"github.com/ildx/merlin/internal/parser"
 	"github.com/ildx/merlin/internal/symlink"
 	"github.com/spf13/cobra"
 )
 
 var unlinkAll bool
+var unlinkNoAutoCommit bool
 
 var unlinkCmd = &cobra.Command{
 	Use:   "unlink [tool]",
@@ -71,13 +75,47 @@ TIPS
 			os.Exit(1)
 		}
 
+		processedTools := []string{}
 		if unlinkAll {
-			runUnlinkAll(repo, vars, dryRun, verbose)
+			processedTools = runUnlinkAll(repo, vars, dryRun, verbose)
 		} else if len(args) == 1 {
 			runUnlinkTool(repo, args[0], vars, dryRun, verbose)
+			processedTools = append(processedTools, args[0])
 		} else {
 			cmd.Help()
 			os.Exit(0)
+		}
+
+		// Auto-commit (unlink) if enabled & not overridden
+		if rootConfig.Settings.AutoCommit && !unlinkNoAutoCommit && !dryRun {
+			if git.IsGitAvailable() {
+				if repoGit, err := git.Open(repo.Root); err == nil && len(processedTools) > 0 {
+					paths := make([]string, 0, len(processedTools))
+					for _, t := range processedTools {
+						paths = append(paths, filepath.Join("config", t))
+					}
+					if unrelated, uErr := repoGit.HasUnrelatedChanges(paths); uErr == nil && unrelated {
+						cli.Warning("auto-commit skipped: unrelated changes detected outside tool directories")
+					} else {
+						paths = repoGit.FilterPaths(paths)
+						msg := buildUnlinkCommitMessage(processedTools)
+						if err := repoGit.Commit(msg, paths); err != nil {
+							if strings.Contains(err.Error(), "no staged changes") {
+								cmdGit := exec.Command("git", "-C", repoGit.Root, "commit", "--allow-empty", "-m", msg)
+								if e2 := cmdGit.Run(); e2 != nil {
+									cli.Warning("auto-commit (unlink) skipped (no changes): %v", err)
+								} else {
+									cli.Success("Auto-commit created (%s)", msg)
+								}
+							} else {
+								cli.Warning("auto-commit (unlink) failed: %v", err)
+							}
+						} else {
+							cli.Success("Auto-commit created (%s)", msg)
+						}
+					}
+				}
+			}
 		}
 	},
 }
@@ -85,6 +123,7 @@ TIPS
 func init() {
 	rootCmd.AddCommand(unlinkCmd)
 	unlinkCmd.Flags().BoolVar(&unlinkAll, "all", false, "Unlink all discovered configs")
+	unlinkCmd.Flags().BoolVar(&unlinkNoAutoCommit, "no-auto-commit", false, "Disable auto-commit even if enabled in settings")
 }
 
 func runUnlinkTool(repo *config.DotfilesRepo, toolName string, vars symlink.Variables, dryRun, verbose bool) {
@@ -131,7 +170,7 @@ func runUnlinkTool(repo *config.DotfilesRepo, toolName string, vars symlink.Vari
 	displayUnlinkResults(results, verbose)
 }
 
-func runUnlinkAll(repo *config.DotfilesRepo, vars symlink.Variables, dryRun, verbose bool) {
+func runUnlinkAll(repo *config.DotfilesRepo, vars symlink.Variables, dryRun, verbose bool) []string {
 	// Discover all tools
 	tools, err := symlink.DiscoverTools(repo, vars)
 	if err != nil {
@@ -141,7 +180,7 @@ func runUnlinkAll(repo *config.DotfilesRepo, vars symlink.Variables, dryRun, ver
 
 	if len(tools) == 0 {
 		fmt.Println("No tools found to unlink")
-		return
+		return []string{}
 	}
 
 	fmt.Printf("Unlinking %d tools\n\n", len(tools))
@@ -150,6 +189,7 @@ func runUnlinkAll(repo *config.DotfilesRepo, vars symlink.Variables, dryRun, ver
 	skipCount := 0
 	errorCount := 0
 
+	processed := []string{}
 	for _, tool := range tools {
 		if len(tool.Links) == 0 {
 			continue
@@ -199,6 +239,7 @@ func runUnlinkAll(repo *config.DotfilesRepo, vars symlink.Variables, dryRun, ver
 		}
 
 		fmt.Println()
+		processed = append(processed, tool.Name)
 	}
 
 	// Summary
@@ -209,6 +250,7 @@ func runUnlinkAll(repo *config.DotfilesRepo, vars symlink.Variables, dryRun, ver
 	if dryRun {
 		fmt.Println("\nThis was a dry run. No changes were made.")
 	}
+	return processed
 }
 
 func displayUnlinkResults(results []*symlink.UnlinkResult, verbose bool) {
@@ -237,4 +279,21 @@ func displayUnlinkResults(results []*symlink.UnlinkResult, verbose bool) {
 	fmt.Println()
 	fmt.Printf("Summary: %d removed, %d skipped, %d errors\n",
 		successCount, skipCount, errorCount)
+}
+
+// buildUnlinkCommitMessage constructs a commit message summarizing unlink operations.
+// Mirrors link commit style to keep history coherent.
+func buildUnlinkCommitMessage(tools []string) string {
+	if len(tools) == 0 {
+		return "chore(unlink): no tools"
+	}
+	if len(tools) == 1 {
+		return fmt.Sprintf("chore(unlink): unlink %s", tools[0])
+	}
+	joined := strings.Join(tools, ", ")
+	if len(tools) <= 3 {
+		return fmt.Sprintf("chore(unlink): unlink %s (%d tools)", joined, len(tools))
+	}
+	preview := strings.Join(tools[:3], ", ")
+	return fmt.Sprintf("chore(unlink): unlink %d tools (%s, …)", len(tools), preview)
 }

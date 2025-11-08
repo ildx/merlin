@@ -10,11 +10,12 @@ type RootMerlinConfig struct {
 
 // Settings contains global configuration settings
 type Settings struct {
-	AutoLink            bool   `toml:"auto_link"`
+	AutoLink             bool   `toml:"auto_link"`
 	ConfirmBeforeInstall bool   `toml:"confirm_before_install"`
-	ConflictStrategy    string `toml:"conflict_strategy"`
-	HomeDir             string `toml:"home_dir"`
-	ConfigDir           string `toml:"config_dir"`
+	ConflictStrategy     string `toml:"conflict_strategy"`
+	HomeDir              string `toml:"home_dir"`
+	ConfigDir            string `toml:"config_dir"`
+	AutoCommit           bool   `toml:"auto_commit"` // enable automatic git commits after operations
 }
 
 // PreinstallSettings defines system requirements installed before profiles
@@ -60,4 +61,3 @@ func (c *RootMerlinConfig) GetProfileByHostname(hostname string) *Profile {
 	}
 	return nil
 }
-
