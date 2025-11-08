@@ -242,6 +242,38 @@ Navigation:
 - Enter: confirm
 - Esc / q: back/quit
 
+### Scripts Flow
+
+The TUI now includes full script execution support with interactive selection:
+
+1. From the main menu, select **Run Scripts**
+2. Choose a tool that has scripts defined
+3. Multi-select which scripts to run (all selected by default)
+   - Space: toggle individual script
+   - `a`: select all
+   - `n`: select none
+   - Scripts with tags are displayed with `[tag1, tag2]`
+4. Watch real-time execution progress with status indicators:
+   - ⏳ Pending
+   - ▶ Running
+   - ✓ Success (with timing)
+   - ✗ Failed (with error details)
+5. Review summary showing successes and failures
+
+Scripts can now include optional tags in `merlin.toml` for better organization:
+
+```toml
+[scripts]
+directory = "scripts"
+scripts = [
+  "setup.sh",                                 # Plain string (backward compatible)
+  { file = "install.sh", tags = ["full"] },  # Tagged script
+  { file = "dev_setup.sh", tags = ["dev", "optional"] }
+]
+```
+
+Tags help categorize scripts for selection but don't affect execution order—all selected scripts run sequentially.
+
 ---
 ## Dry-Run Strategy
 
@@ -300,9 +332,10 @@ Use profiles if managing multiple machines.
 ---
 ## Future Enhancements (Planned)
 
-- Full scripts flow in TUI
+- Script retry mechanism after failures
 - Backup/restore and diff capabilities
 - Remote repository cloning
+- Tag-based script filtering in CLI
 
 ---
 ## Reference

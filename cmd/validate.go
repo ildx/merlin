@@ -349,10 +349,12 @@ func validateToolConfig(repo *config.DotfilesRepo, toolName string) *ValidationR
 	if toolConfig.HasScripts() {
 		scriptsDir := filepath.Join(repo.GetToolRoot(toolName), toolConfig.Scripts.Directory)
 		for _, script := range toolConfig.Scripts.Scripts {
-			scriptPath := filepath.Join(scriptsDir, script)
+			name := script.File
+			scriptPath := filepath.Join(scriptsDir, name)
 			if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-				result.Errors = append(result.Errors, fmt.Sprintf("Script doesn't exist: %s", script))
+				result.Errors = append(result.Errors, fmt.Sprintf("Script doesn't exist: %s", name))
 			}
+			// Warn if script has tags but directory missing (already handled above) - placeholder for future advanced validation
 		}
 	}
 

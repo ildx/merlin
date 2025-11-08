@@ -120,7 +120,6 @@ Merlin is a **macOS-focused** CLI tool for managing dotfiles repositories. It wi
 - Add `merlin install brew` command (formulae only for now)
 - **Test:** Install a single formulae, verify it works
 
-**Dependencies:** None
 
 ### Step 3.3: Brew Install - Casks
 - Extend `InstallCasks()` in `brew.go`
@@ -140,82 +139,40 @@ Merlin is a **macOS-focused** CLI tool for managing dotfiles repositories. It wi
 ---
 
 ## Phase 4: Mac App Store Installation
-
-**Goal:** Install MAS apps from mas.toml
-
-### Step 4.1: MAS Integration
-- Check if `mas` is installed
-- Implement `InstallMASApp()` in `internal/installer/mas.go`
 - Execute `mas install <id>`
-- Check if already installed: `mas list | grep <id>`
 - Add `merlin install mas` command
 - **Test:** Install an app from App Store via ID
 
 **Dependencies:** None
 
 ### Step 4.2: MAS Account Check
-- Add `CheckMASAccount()` - verify signed into App Store
 - Display helpful message if not signed in
 - **Test:** Gracefully handle not-signed-in state
 
 **Dependencies:** None
 
 ---
-
-## Phase 5: Native Dotfiles Symlinking
-
 **Goal:** Implement native symlinking without external dependencies
 
-### Step 5.1: Config Discovery
-- Create `internal/symlink/` package
-- Add `DiscoverConfigPackages()` - scan `<dotfiles>/config/*/config/` dirs
 - For each tool, check if `config/TOOL/merlin.toml` exists
 - If exists, parse tool-specific config; otherwise use defaults
-- Read root `merlin.toml` for global settings
-- Add `merlin list configs` command
-- **Test:** Lists all available config packages, respects per-tool merlin.toml settings
 
 **Dependencies:** None (uses Phase 2 parser)
-
-### Step 5.2: Symlink Core Logic
-- Implement `WalkAndLink(sourceDir, targetDir)` - recursively walk directories
 - For each file: create symlink from target → source
 - Preserve directory structure
-- Handle nested directories (create parent dirs as needed)
-- Add `internal/symlink/conflict.go` for conflict detection
-- Support custom source/target from per-tool `merlin.toml` `[[link]]` entries
 - If no per-tool config, use defaults: `config/` → `~/.config/TOOL/`
 - **Test:** Unit tests for directory walking and symlink creation with custom paths and defaults
-
-**Dependencies:** None (stdlib `os`, `filepath`)
-
 ### Step 5.3: Conflict Resolution
 - Detect existing files/symlinks at target location
-- Implement strategies:
-  - **Skip** - leave existing file alone
-  - **Backup** - move existing file to `.backup.timestamp`
   - **Overwrite** - replace existing file
   - **Interactive** - ask user what to do
-- Respect `conflict_strategy` from `merlin.toml` settings
-- Add `merlin link <tool>` command with `--strategy` flag (overrides config)
 - **Test:** Link a single config (e.g., eza), handle conflicts gracefully
 
-**Dependencies:** None
-
-### Step 5.4: Batch Linking & Status
 - Add `merlin link --all` - link all discovered configs
 - Add `merlin link --select` - interactive selection
-- Implement `GetLinkStatus(tool)` - check if tool's configs are already linked
-- Show status: ✓ linked, ✗ not linked, ⚠ conflict
-- **Test:** Link multiple configs, verify status reporting
 
 **Dependencies:** None
-
-### Step 5.5: Unlinking Support
-- Implement `UnlinkConfig(tool)` - remove symlinks for a tool
-- Only remove if symlink points to our dotfiles (safety check)
 - Leave regular files untouched
-- Add `merlin unlink <tool>` command
 - Add `merlin unlink --all`
 - **Test:** Unlink removes only our symlinks, preserves other files
 

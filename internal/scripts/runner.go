@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ildx/merlin/internal/logger"
 	"github.com/ildx/merlin/internal/models"
 )
 
@@ -66,9 +67,9 @@ func (r *ScriptRunner) RunScripts(config *models.ToolMerlinConfig) ([]*ScriptRes
 
 	var results []*ScriptResult
 
-	for _, scriptName := range config.Scripts.Scripts {
-		scriptPath := filepath.Join(scriptDir, scriptName)
-		
+	for _, scriptItem := range config.Scripts.Scripts {
+		scriptPath := filepath.Join(scriptDir, scriptItem.File)
+
 		result := r.RunScript(scriptPath)
 		results = append(results, result)
 
@@ -104,11 +105,13 @@ func (r *ScriptRunner) RunScript(scriptPath string) *ScriptResult {
 	// Dry run mode
 	if r.DryRun {
 		fmt.Fprintf(r.Output, "  [DRY RUN] Would execute: %s\n", result.Script)
+		logger.Info("Script dry-run", "script", result.Script, "path", scriptPath)
 		result.Success = true
 		return result
 	}
 
 	// Execute script
+	logger.Info("Starting script execution", "script", result.Script, "path", scriptPath)
 	startTime := time.Now()
 
 	cmd := exec.Command(scriptPath)
@@ -178,11 +181,19 @@ func (r *ScriptRunner) RunScript(scriptPath string) *ScriptResult {
 			result.ExitCode = exitErr.ExitCode()
 		}
 		result.Error = fmt.Errorf("script failed with exit code %d", result.ExitCode)
+		logger.Error("Script execution failed",
+			"script", result.Script,
+			"exitCode", result.ExitCode,
+			"duration", result.Duration.Seconds(),
+			"error", err)
 		return result
 	}
 
 	result.ExitCode = 0
 	result.Success = true
+	logger.Info("Script execution completed",
+		"script", result.Script,
+		"duration", result.Duration.Seconds())
 	return result
 }
 
@@ -241,21 +252,20 @@ func ValidateScripts(toolRoot string, config *models.ToolMerlinConfig) []error {
 		return errors
 	}
 
-	for _, scriptName := range config.Scripts.Scripts {
-		scriptPath := filepath.Join(scriptDir, scriptName)
-		
+	for _, scriptItem := range config.Scripts.Scripts {
+		scriptPath := filepath.Join(scriptDir, scriptItem.File)
+
 		info, err := os.Stat(scriptPath)
 		if err != nil {
-			errors = append(errors, fmt.Errorf("script not found: %s", scriptName))
+			errors = append(errors, fmt.Errorf("script not found: %s", scriptItem.File))
 			continue
 		}
 
 		// Check if executable
 		if info.Mode()&0111 == 0 {
-			errors = append(errors, fmt.Errorf("script not executable: %s", scriptName))
+			errors = append(errors, fmt.Errorf("script not executable: %s", scriptItem.File))
 		}
 	}
 
 	return errors
 }
-

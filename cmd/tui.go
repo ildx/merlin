@@ -18,7 +18,7 @@ var tuiCmd = &cobra.Command{
 FEATURES
 	• Browse & install Homebrew packages (formulae & casks)
 	• Manage dotfiles (link/unlink configs)
-	• Run setup scripts (flow coming soon)
+	• Run setup scripts with multi-select and real-time progress
 	• System doctor shortcut
 
 NAVIGATION
@@ -27,13 +27,19 @@ NAVIGATION
 	Enter              Confirm
 	Esc / q            Back / quit
 
+SCRIPT EXECUTION
+	• Select a tool with defined scripts
+	• Multi-select scripts to run (supports tags for organization)
+	• Watch real-time execution with status indicators
+	• Review summary with timing and errors
+
 EXAMPLES
 	merlin tui         # Launch interface
 	merlin             # Same (default when no subcommand)
 
 NOTES
-	Script execution flow in TUI is a placeholder; use 'merlin run <tool>' for now.
 	All operations respect global --dry-run and --verbose flags when applicable.
+	Scripts are logged to ~/.merlin/merlin.log with timing information.
 
 SEE ALSO
 	merlin install, merlin link, merlin run, merlin doctor`,
@@ -94,8 +100,5 @@ func runTUIDotfiles() error {
 }
 
 func runTUIScripts() error {
-	// TODO: Implement scripts flow
-	fmt.Println("\n🚧 Scripts TUI coming soon!")
-	fmt.Println("For now, use: merlin run <tool>")
-	return nil
+	return tui.LaunchScriptRunner()
 }

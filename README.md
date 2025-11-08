@@ -52,10 +52,17 @@ Flags: `--dry-run`, `--verbose` (global), plus command‑specific ones (`--all`,
 Running `merlin` (or `merlin tui`) launches an interactive interface where you can:
 - Browse and select packages to install with checkboxes
 - Manage dotfiles (link/unlink configs)
-- Run tool scripts
+- Run tool scripts with multi-select and real-time progress tracking
 - Check system prerequisites
 
 Navigate with arrow keys or vim keys (j/k), select with space, confirm with enter.
+
+The scripts flow now includes:
+- Tool selection from all tools with scripts
+- Multi-select individual scripts (supports tagged scripts for organization)
+- Real-time execution progress with status indicators (⏳ Pending, ▶ Running, ✓ Success, ✗ Failed)
+- Execution timing and error details
+- Summary of successes and failures
 
 ## Dotfiles Structure (expected)
 
@@ -105,7 +112,21 @@ files = [
 
 ## Scripts
 
-Defined under `[scripts]` in a tool `merlin.toml`; run with `merlin run <tool>` or after linking using `--run-scripts`.
+Defined under `[scripts]` in a tool `merlin.toml`; run with `merlin run <tool>` or after linking using `--run-scripts`, or interactively through the TUI.
+
+Scripts can now include optional tags for organization:
+
+```toml
+[scripts]
+directory = "scripts"
+scripts = [
+  "setup.sh",                                      # Plain string
+  { file = "install.sh", tags = ["full"] },       # Tagged script
+  { file = "dev_tools.sh", tags = ["dev", "optional"] }
+]
+```
+
+Tags are displayed in the TUI selector and logged, helping you identify script purposes at a glance.
 
 ## Quick Start
 
@@ -138,7 +159,13 @@ go build -o merlin
 
 ## Roadmap Notes
 
-Script flow in TUI is currently a placeholder; use `merlin run <tool>`.
+Implemented Phase 10 features:
+- ✅ Script tags for organization
+- ✅ Full interactive TUI scripts flow with selection and execution
+- ✅ Real-time progress tracking with status indicators
+- ✅ Enhanced logging with per-script timing
+
+Future enhancements may include script retry mechanisms and tag-based CLI filtering.
 
 ## Build & Test
 

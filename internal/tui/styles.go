@@ -10,6 +10,7 @@ var (
 	errorColor     = lipgloss.Color("#EF4444")
 	warningColor   = lipgloss.Color("#F59E0B")
 	mutedColor     = lipgloss.Color("#6B7280")
+	accentColor    = lipgloss.Color("#06B6D4")
 
 	// Base styles
 	titleStyle = lipgloss.NewStyle().
@@ -45,6 +46,9 @@ var (
 	warningStyle = lipgloss.NewStyle().
 			Foreground(warningColor).
 			Bold(true)
+
+	dimStyle = lipgloss.NewStyle().
+			Foreground(mutedColor)
 
 	// Box styles
 	boxStyle = lipgloss.NewStyle().

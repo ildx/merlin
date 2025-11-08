@@ -226,7 +226,7 @@ target = "/Applications/Ghostty.app/Contents/Resources/ghostty/themes"
 
 ---
 
-## Tool Configuration - Scripts
+## Tool Configuration - Scripts & Tags
 
 For tools needing custom setup logic:
 
@@ -251,11 +251,39 @@ files = [
 [scripts]
 directory = "scripts"
 scripts = [
-  "install_extensions.sh"
+  "install_extensions.sh",                      # Simple form
+  { file = "post_install_cleanup.sh" },         # Extended form (no tags)
+  { file = "large_setup.sh", tags = ["full"] }, # Tagged script
+  { file = "dev_only.sh", tags = ["dev", "fast"] }
 ]
 ```
 
-**Scripts are executed in order after symlinking.**
+**Scripts are executed in order after symlinking.** Each entry can be either:
+
+1. A plain string (backward compatible): `"script.sh"`
+2. A table with a `file` (or `name`) key and optional `tags` array: `{ file = "script.sh", tags = ["tag"] }`
+
+### Script Tags
+
+Tags allow selective execution or filtering (e.g., in the TUI script selection flow):
+
+```toml
+[scripts]
+directory = "scripts"
+scripts = [
+  { file = "base.sh", tags = ["core"] },
+  { file = "optional_fonts.sh", tags = ["fonts", "ui"] },
+  { file = "heavy_index.sh", tags = ["full","slow"] }
+]
+```
+
+Potential usage scenarios:
+
+- Skip long-running scripts by deselecting those tagged `slow`
+- Run only `dev` scripts on a development machine
+- Filter for `core` scripts in a minimal setup
+
+> NOTE: Tag-based filtering is optional and surfaced primarily through interactive tooling (Phase 10 TUI). Non-interactive CLI flows continue to run all listed scripts.
 
 ---
 
@@ -535,7 +563,14 @@ scripts = ["generate_config.sh"]
 
 **[scripts]**
 - `directory` (string) - Directory containing scripts (relative to tool dir)
-- `scripts` (array of strings) - Scripts to execute in order
+- `scripts` (array) - Scripts to execute in order. Each element may be:
+  - Plain string: `"script.sh"`
+  - Table: `{ file = "script.sh", tags = ["tag1", "tag2"] }`
+  - Alternate key `name` accepted instead of `file` for convenience
+
+**Script object fields:**
+- `file` (string) - Script file name (required in table form)
+- `tags` (array of strings, optional) - Classification labels for selection/filtering
 
 ---
 

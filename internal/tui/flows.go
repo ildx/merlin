@@ -10,6 +10,7 @@ import (
 	"github.com/ildx/merlin/internal/installer"
 	"github.com/ildx/merlin/internal/models"
 	"github.com/ildx/merlin/internal/parser"
+	"github.com/ildx/merlin/internal/scripts"
 	"github.com/ildx/merlin/internal/symlink"
 )
 
@@ -276,4 +277,139 @@ func printUnlinkResults(results []*symlink.UnlinkResult) {
 			fmt.Printf("  ✗ %s (error: %s)\n", result.Target, result.Message)
 		}
 	}
+}
+
+// LaunchScriptRunner shows tool and script selection, then runs scripts
+func LaunchScriptRunner() error {
+	// Find dotfiles repo
+	repo, err := config.FindDotfilesRepo()
+	if err != nil {
+		return fmt.Errorf("dotfiles repository not found: %w", err)
+	}
+
+	// Get all tools with scripts
+	tools, err := repo.ListTools()
+	if err != nil {
+		return fmt.Errorf("failed to list tools: %w", err)
+	}
+
+	// Build tool script items
+	var toolScriptItems []ToolScriptItem
+	for _, toolName := range tools {
+		toolPath := repo.GetToolMerlinConfig(toolName)
+		if _, err := os.Stat(toolPath); os.IsNotExist(err) {
+			continue
+		}
+
+		toolConfig, err := parser.ParseToolMerlinTOML(toolPath)
+		if err != nil {
+			continue
+		}
+
+		if !toolConfig.HasScripts() {
+			continue
+		}
+
+		toolScriptItems = append(toolScriptItems, ToolScriptItem{
+			ToolName:    toolName,
+			Description: toolConfig.Tool.Description,
+			Scripts:     toolConfig.Scripts.Scripts,
+		})
+	}
+
+	if len(toolScriptItems) == 0 {
+		fmt.Println("\n📜 No tools with scripts found.")
+		return nil
+	}
+
+	// Show tool selector
+	toolSelector := NewToolScriptSelectorModel("📜 Select Tool to Run Scripts", toolScriptItems)
+	p := tea.NewProgram(toolSelector, tea.WithAltScreen())
+	finalModel, err := p.Run()
+	if err != nil {
+		return err
+	}
+
+	toolModel, ok := finalModel.(ToolScriptSelectorModel)
+	if !ok || toolModel.IsCancelled() || !toolModel.IsConfirmed() {
+		return nil
+	}
+
+	selectedTool := toolModel.GetSelectedTool()
+	if selectedTool == nil {
+		return nil
+	}
+
+	// Show script selector
+	scriptSelector := NewScriptSelectorModel(
+		"📜 Select Scripts to Run",
+		selectedTool.ToolName,
+		selectedTool.Scripts,
+	)
+	p = tea.NewProgram(scriptSelector, tea.WithAltScreen())
+	finalModel, err = p.Run()
+	if err != nil {
+		return err
+	}
+
+	scriptModel, ok := finalModel.(ScriptSelectorModel)
+	if !ok || scriptModel.IsCancelled() || !scriptModel.IsConfirmed() {
+		return nil
+	}
+
+	selectedScripts := scriptModel.GetSelectedScripts()
+	if len(selectedScripts) == 0 {
+		fmt.Println("\n📜 No scripts selected.")
+		return nil
+	}
+
+	// Parse tool config to get script directory
+	toolPath := repo.GetToolMerlinConfig(selectedTool.ToolName)
+	toolConfig, err := parser.ParseToolMerlinTOML(toolPath)
+	if err != nil {
+		return fmt.Errorf("failed to parse tool config: %w", err)
+	}
+
+	toolRoot := repo.GetToolRoot(selectedTool.ToolName)
+	scriptDir := filepath.Join(toolRoot, toolConfig.Scripts.Directory)
+	if toolConfig.Scripts.Directory == "" {
+		scriptDir = filepath.Join(toolRoot, "scripts")
+	}
+
+	// Create script runner
+	env := map[string]string{
+		"MERLIN_TOOL":      selectedTool.ToolName,
+		"MERLIN_TOOL_ROOT": toolRoot,
+	}
+	runner := scripts.NewScriptRunner(toolRoot, env, false, false, os.Stdout)
+
+	// Run scripts with progress UI
+	runnerModel := NewScriptRunnerModel(
+		selectedTool.ToolName,
+		toolRoot,
+		scriptDir,
+		selectedScripts,
+		runner,
+	)
+	p = tea.NewProgram(runnerModel, tea.WithAltScreen())
+	finalModel, err = p.Run()
+	if err != nil {
+		return err
+	}
+
+	runnerFinal, ok := finalModel.(ScriptRunnerModel)
+	if !ok {
+		return nil
+	}
+
+	// Check for failures and optionally offer retry
+	if runnerFinal.HasFailures() {
+		failed := runnerFinal.GetFailedScripts()
+		fmt.Printf("\n⚠ %d script(s) failed:\n", len(failed))
+		for _, exec := range failed {
+			fmt.Printf("  • %s: %v\n", exec.Script.File, exec.Error)
+		}
+	}
+
+	return nil
 }
